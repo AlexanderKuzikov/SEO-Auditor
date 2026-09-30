@@ -699,7 +699,7 @@ def site_report(pages: list, robots: dict, sitemaps: dict, site: str) -> tuple:
         'indexable': sum(1 for p in ok if p['indexable']),
         'with_schema': sum(1 for p in ok if p['schema_types']),
         'sitemap_urls': len(sitemaps.get('urls') or []),
-        'not_in_sitemap': len(not_in_sitemap),
+        'not_in_sitemap': len(not_in_sitemap) if sm_keys else None,
         'orphans': len(orphans),
         'issues_by_level': by_level,
         'issues_by_code': dict(sorted(top_codes.items(), key=lambda x: -x[1])),
@@ -789,35 +789,14 @@ def audit_page(url: str, host: str, use_psi: bool, psi_key: str, strategy: str) 
     return page
 
 
-def main() -> None:
-    sys.stdout.reconfigure(encoding='utf-8')
-    ap = argparse.ArgumentParser(description='On-page SEO-аудит с diff прогонов')
-    ap.add_argument('site', nargs='?', help='URL сайта')
-    ap.add_argument('--limit', type=int, default=200, help='максимум URL (по умолчанию 200)')
-    ap.add_argument('--urls', help='файл со списком URL, по одному в строке')
-    ap.add_argument('--psi', action='store_true', help='добавить PageSpeed Insights (field data)')
-    ap.add_argument('--psi-strategy', default='mobile', choices=('mobile', 'desktop'))
-    ap.add_argument('--diff', action='store_true', help='сравнить с предыдущим снимком')
-    ap.add_argument('--compare', nargs=2, metavar=('OLD', 'NEW'), help='diff двух файлов')
-    ap.add_argument('--out', help='путь к файлу снимка')
-    args = ap.parse_args()
-
-    if args.compare:
-        with open(args.compare[0], encoding='utf-8') as f:
-            old = json.load(f)
-        with open(args.compare[1], encoding='utf-8') as f:
-            new = json.load(f)
-        print(json.dumps(compare(old, new), ensure_ascii=False, indent=2))
-        return
-
-    if not args.site:
-        ap.error('нужен URL сайта или --compare OLD NEW')
-    site = args.site.rstrip('/')
+def run_site(site: str, args) -> dict | None:
+    """Полный цикл по одному сайту. Возвращает краткую сводку или None при неудаче."""
     if '://' not in site:
         site = 'https://' + site
+    site = site.rstrip('/')
     host = urllib.parse.urlsplit(site).netloc.lower()
     audit_dir = os.path.join(AUDIT_ROOT, host.replace(':', '_'))
-    print(f'сайт: {site}')
+    print(f'\n{"=" * 60}\nсайт: {site}')
 
     robots = parse_robots(site)
     print(f"robots.txt: HTTP {robots['status']}, sitemaps в директиве: {len(robots['sitemaps'])}")
@@ -836,7 +815,8 @@ def main() -> None:
     urls = [u for u in urls if not u.lower().split('?')[0].endswith(SEO_SUFFIX)][:args.limit]
     print(f'URL к проверке: {len(urls)} (источник: {source})')
     if not urls:
-        sys.exit('не нашлось ни одного URL для проверки')
+        print('пропускаю сайт: не нашлось ни одного URL для проверки')
+        return None
 
     psi_key = os.environ.get('PSI_API_KEY', '').strip()
     started = time.time()
@@ -897,6 +877,14 @@ def main() -> None:
         for i in site_issues:
             print(f"  [{i['level']}] {i['code']}: {i['msg']}")
 
+    row = {'host': host, 'ok': summary['ok'], 'broken': summary['broken'],
+           'orphans': summary['orphans'], 'not_in_sitemap': summary['not_in_sitemap'],
+           'indexable': summary['indexable'], 'with_schema': summary['with_schema'],
+           'median_words': summary['median_words'], 'snapshot': out,
+           'source': source, 'sitemap_urls': summary['sitemap_urls'],
+           'errors': summary['issues_by_level'].get('error', 0),
+           'top_issue': next(iter(summary['issues_by_code']), '—')}
+
     if args.diff:
         prev, prev_name = load_snapshots(audit_dir, skip=os.path.basename(out))
         if not prev:
@@ -913,6 +901,85 @@ def main() -> None:
             for ic in d['issue_counts']:
                 print(f"  {ic['code']}: {ic['from']} → {ic['to']} ({ic['delta']:+d})")
             print(f'diff: {path}')
+            row['diff'] = {'added': len(d['added']), 'removed': len(d['removed']),
+                           'metric_changes': d['metric_changes_total'],
+                           'regressions': [ic for ic in d['issue_counts'] if ic['delta'] > 0]}
+    return row
+
+
+def print_overview(rows: list) -> None:
+    """Сводка по всем доменам — на неё смотришь, чтобы понять, куда лезть."""
+    if not rows:
+        return
+    print(f'\n{"=" * 60}\nСВОДКА ПО СЕТИ — {len(rows)} домен(ов)\n')
+    print('ист = источник URL; bfs = sitemap недоступен, обход с главной по ссылкам (покрытие неполное)')
+    head = (f"{'домен':<22} {'ист':<6} {'ok':>4} {'404':>4} {'ошиб':>5} {'сирот':>6} "
+            f"{'не в sm':>8} {' слов':>6}  топ-проблема")
+    print(head)
+    print('-' * len(head))
+    for r in rows:
+        words = r['median_words'] if r['median_words'] is not None else '—'
+        missed = r['not_in_sitemap'] if r['not_in_sitemap'] is not None else '—'
+        print(f"{r['host']:<22} {r['source']:<6} {r['ok']:>4} {r['broken']:>4} "
+              f"{r['errors']:>5} {r['orphans']:>6} {str(missed):>8} {str(words):>6}  {r['top_issue']}")
+    total_err = sum(r['errors'] for r in rows)
+    total_broken = sum(r['broken'] for r in rows)
+    partial = [r['host'] for r in rows if r['source'] != 'sitemap']
+    print(f"\nвсего замечаний уровня error: {total_err}, битых URL: {total_broken}")
+    if partial:
+        print('неполное покрытие (нужен sitemap или --urls): ' + ', '.join(partial))
+    regressions = [(r['host'], ic) for r in rows if r.get('diff')
+                   for ic in r['diff']['regressions']]
+    if regressions:
+        print('\nРЕГРЕССИИ относительно прошлого прогона (счётчик вырос):')
+        for host, ic in sorted(regressions, key=lambda x: -x[1]['delta']):
+            print(f"  {host:<24} {ic['code']}: {ic['from']} → {ic['to']} ({ic['delta']:+d})")
+    else:
+        print('\nрегрессий нет — ни один счётчик проблем не вырос')
+
+
+def main() -> None:
+    sys.stdout.reconfigure(encoding='utf-8')
+    ap = argparse.ArgumentParser(description='On-page SEO-аудит с diff прогонов')
+    ap.add_argument('site', nargs='?', help='URL сайта')
+    ap.add_argument('--all', metavar='FILE', help='файл со списком доменов, по одному в строке')
+    ap.add_argument('--limit', type=int, default=200, help='максимум URL на сайт (по умолчанию 200)')
+    ap.add_argument('--urls', help='файл со списком URL одного сайта')
+    ap.add_argument('--psi', action='store_true', help='добавить PageSpeed Insights (field data)')
+    ap.add_argument('--psi-strategy', default='mobile', choices=('mobile', 'desktop'))
+    ap.add_argument('--diff', action='store_true', help='сравнить с предыдущим снимком')
+    ap.add_argument('--compare', nargs=2, metavar=('OLD', 'NEW'), help='diff двух файлов')
+    ap.add_argument('--out', help='путь к файлу снимка (только для одного сайта)')
+    args = ap.parse_args()
+
+    if args.compare:
+        with open(args.compare[0], encoding='utf-8') as f:
+            old = json.load(f)
+        with open(args.compare[1], encoding='utf-8') as f:
+            new = json.load(f)
+        print(json.dumps(compare(old, new), ensure_ascii=False, indent=2))
+        return
+
+    if args.all:
+        if args.site or args.out:
+            ap.error('--all несовместим с позиционным URL и --out')
+        if args.urls:
+            ap.error('--urls рассчитан на один сайт, с --all он применится к каждому домену')
+        with open(args.all, encoding='utf-8') as f:
+            sites = [l.split('#')[0].strip() for l in f]
+        sites = [s for s in sites if s and not s.startswith('#')]
+        if not sites:
+            sys.exit(f'в файле {args.all} нет ни одного домена')
+        print(f'доменов в списке: {len(sites)}')
+        rows = [r for r in (run_site(s, args) for s in sites) if r]
+        print_overview(rows)
+        return
+
+    if not args.site:
+        ap.error('нужен URL сайта, --all FILE или --compare OLD NEW')
+    row = run_site(args.site, args)
+    if row:
+        print_overview([row])
 
 
 if __name__ == '__main__':

@@ -26,23 +26,44 @@ Zero-dependency CLI на стандартной библиотеке Python. О�
 ## Использование
 
 ```bash
+# один сайт
 python onpage_audit.py https://example.ru --limit 200
+
+# сеть доменов из файла + сравнение с предыдущим прогоном
+python onpage_audit.py --all sites.txt --limit 200 --diff
+
+# после деплоя: посмотреть, что именно сломалось
 python onpage_audit.py https://example.ru --limit 200 --diff
-python onpage_audit.py https://example.ru --urls data/urls.txt --psi
+
+# diff двух произвольных снимков, без обхода
 python onpage_audit.py --compare audits/example.ru/onpage-A.json audits/example.ru/onpage-B.json
+
+# Core Web Vitals (нужен ключ PSI_API_KEY) и свой список URL
+python onpage_audit.py --all sites.txt --psi
+python onpage_audit.py https://example.ru --urls data/urls.txt
 ```
+
+`--all` читает `sites.txt`: по одному домену в строке, без `https://`, строки с `#`
+игнорируются. Каждый домен обходится отдельно, снимки изолированы по хостам, в конце
+печатается сводная таблица и — при `--diff` — регрессии, то есть проблемы, которых
+стало больше. Это первое, на что стоит смотреть.
+
+Столбец `ист` в сводке показывает источник URL: `sitemap` — полное покрытие, `bfs` —
+sitemap недоступен, обход с главной по ссылкам, покрытие неполное. Для таких сайтов
+задай `--urls` со своим списком.
 
 ## Опции
 
 | Флаг | Описание | Default |
 |------|----------|---------|
-| `--limit N` | максимум URL за прогон | 200 |
-| `--urls FILE` | свой список URL вместо sitemap | — |
+| `--all FILE` | прогон по списку доменов + сводка по сети | — |
+| `--limit N` | максимум URL на сайт | 200 |
+| `--urls FILE` | свой список URL одного сайта | — |
 | `--diff` | сравнить с предыдущим снимком | off |
 | `--compare OLD NEW` | diff двух файлов, без обхода | — |
 | `--psi` | добавить Core Web Vitals (нужен `PSI_API_KEY`) | off |
 | `--psi-strategy` | `mobile` или `desktop` | mobile |
-| `--out FILE` | свой путь к снимку | `audits/<host>/onpage-<date>.json` |
+| `--out FILE` | свой путь к снимку (только для одного сайта) | `audits/<host>/onpage-<date>.json` |
 
 ## Проверка
 

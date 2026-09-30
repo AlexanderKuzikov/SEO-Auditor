@@ -2,6 +2,7 @@
 
 ## Commands
 - audit: `python onpage_audit.py <site-url> [--limit N] [--diff] [--urls FILE] [--psi] [--out FILE]`
+- network: `python onpage_audit.py --all sites.txt [--limit N] [--diff]` — сводка по всем доменам + регрессии
 - compare: `python onpage_audit.py --compare OLD.json NEW.json`
 - self-check: `python onpage_selfcheck.py` — единственный тест, гонять после любой правки
 
@@ -11,11 +12,13 @@
 - Один файл = один инструмент. Не разбивать на пакет без запроса: `onpage_audit.py` сознательно монолит, его можно скопировать на любой сервер.
 - Код и идентификаторы — английский, сообщения пользователю и коды проблем — русский. Вывод в консоль переводить в UTF-8 (`sys.stdout.reconfigure`).
 - Снимки — `audits/<host>/onpage-<YYYY-MM-DD>.json`. Повторный прогон в тот же день архивируется как `onpage-<YYYY-MM-DD>-<HHMMSS>.json`, не затирает предыдущий.
+- `sites.txt` — список доменов сети, по одному в строке, без `https://`, комментарии через `#`. Он коммитится: это конфигурация, а не данные.
 - Секреты только из окружения: `PSI_API_KEY`. В `.env` проекта ключей не хранить, файл не нужен.
 
 ## Structure
 - `onpage_audit.py` — краулер, парсер, чеки, снимок, diff
 - `onpage_selfcheck.py` — самопроверка парсера, чеков и diff на фикстурах в коде
+- `sites.txt` — домены для `--all`
 - `audits/<host>/` — снимки и diff-прогоны по датам
 - `docs/CHECKS.md` — список проверок с кодами и порогами (правится при добавлении чека)
 
