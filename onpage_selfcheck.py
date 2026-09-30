@@ -150,6 +150,12 @@ def main() -> None:
     sb = analyze(res('https://zavodsvay.ru/x/', SCHEMA_BAD), HOST)
     check('битый JSON-LD', 'SCHEMA_INVALID' in codes(sb), True)
 
+    parked = analyze(res('http://ubm-85.su/',
+                         '<html><head><title>Срок регистрации домена истек</title></head>'
+                         '<body>Домен зарегистрирован в Рег.ру. Срок регистрации домена '
+                         'ubm-85.su истек. Требуется продление.</body></html>'), 'ubm-85.su')
+    check('парковка регистратора распознана', 'DOMAIN_EXPIRED' in codes(parked), True)
+
     ml = analyze(res('https://example.ru/svai/', MULTILANG), 'example.ru')
     check('hreflang собран как lang+url', ml['hreflang'],
           [{'lang': 'ru', 'href': 'https://example.ru/svai/'},

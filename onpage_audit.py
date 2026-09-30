@@ -381,6 +381,14 @@ def analyze(res: dict, host: str, thin_words: int = THIN_WORDS) -> dict:
     vis = p.visible_text()
     text_len = len(vis)
 
+    # Парковка/истечение домена: страница отдаётся, но это не сайт.
+    low = vis.lower()
+    if ('срок регистрации' in low and 'истек' in low) or 'expired.reg.ru' in res['url'] \
+            or 'domain is expired' in low:
+        add('error', 'DOMAIN_EXPIRED', 'домен просрочен: отдаётся парковочная страница регистратора',
+            'продлить домен. До продления хостинг отключён, TLS не работает, '
+            'весь контент недоступен посетителям')
+
     src_sp, fin_sp = urllib.parse.urlsplit(url), urllib.parse.urlsplit(final)
     if norm_key(url) != norm_key(final):
         page['redirect_kind'] = 'path'
@@ -836,6 +844,8 @@ def run_site(site: str, args) -> dict | None:
     if tls_issue:
         print(f'  {site}')
         print('  ВНИМАНИЕ: HTTPS не отвечает — продолжаю по HTTP, это отдельный дефект')
+    if site.startswith('http://'):
+        print('  ВНИМАНИЕ: домен работает только по HTTP')
 
     robots = parse_robots(site)
     print(f"robots.txt: HTTP {robots['status']}, sitemaps в директиве: {len(robots['sitemaps'])}")
