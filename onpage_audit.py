@@ -1025,6 +1025,39 @@ def parse_site_line(line: str) -> tuple:
     return domain.strip(), opts
 
 
+def site_options(host: str) -> dict:
+    """Настройки домена из sites.txt, чтобы одиночный запуск и --all давали одно и то же."""
+    path = os.path.join(ROOT, 'sites.txt')
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            domain, opts = parse_site_line(line)
+            if domain.lower().split('//')[-1].split('/')[0] == host:
+                return opts
+    return {}
+
+
+def apply_site_options(args, domain: str, source: str) -> None:
+    """Применяет настройки домена. source: 'sites.txt' или 'аргумент командной строки'."""
+    opts = site_options(urllib.parse.urlsplit(domain).netloc.lower() or domain)
+    for key, raw in opts.items():
+        attr = key.replace('-', '_')
+        if not hasattr(args, attr):
+            print(f'  игнорирую неизвестную настройку {key} у {domain}')
+            continue
+        if attr in ('thin_words', 'limit'):
+            value = int(raw)
+        elif attr == 'psi':
+            value = raw.lower() in ('1', 'true', 'yes')
+        else:
+            print(f'  игнорирую неизвестную настройку {key} у {domain}')
+            continue
+        if getattr(args, attr) != value:
+            print(f'  {attr} = {value} (из {source})')
+            setattr(args, attr, value)
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser(description='On-page SEO-аудит с diff прогонов')
@@ -1065,17 +1098,8 @@ def main() -> None:
         rows = []
         for domain, opts in sites:
             site_args = argparse.Namespace(**vars(args))
-            if 'thin-words' in opts:
-                site_args.thin_words = int(opts['thin-words'])
-            if 'limit' in opts:
-                site_args.limit = int(opts['limit'])
-            if 'psi' in opts:
-                site_args.psi = opts['psi'].lower() in ('1', 'true', 'yes')
-            for key in opts:
-                if key not in ('thin-words', 'limit', 'psi'):
-                    print(f'  игнорирую неизвестную настройку {key} у {domain}')
-            if site_args.thin_words != args.thin_words:
-                print(f'  {domain}: порог THIN_CONTENT = {site_args.thin_words}')
+            if opts:
+                apply_site_options(site_args, domain, 'sites.txt')
             row = run_site(domain, site_args)
             if row:
                 rows.append(row)
@@ -1084,7 +1108,11 @@ def main() -> None:
 
     if not args.site:
         ap.error('нужен URL сайта, --all FILE или --compare OLD NEW')
-    row = run_site(args.site, args)
+    single = argparse.Namespace(**vars(args))
+    if site_options(args.site.strip()):
+        print('домен найден в sites.txt — применяю его настройки')
+        apply_site_options(single, args.site, 'sites.txt')
+    row = run_site(args.site, single)
     if row:
         print_overview([row])
 

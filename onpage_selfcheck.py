@@ -159,6 +159,21 @@ def main() -> None:
           parse_site_line('zavodsvay.ru # thin-words=45 limit=100'),
           ('zavodsvay.ru', {'thin-words': '45', 'limit': '100'}))
     check('домен без настроек', parse_site_line('  ubm.ru  '), ('ubm.ru', {}))
+    from onpage_audit import site_options, apply_site_options
+    check('настройки домена читаются из sites.txt',
+          site_options('zavodsvay.ru').get('thin-words'), '45')
+    check('домен без настроек не выдумывает их', site_options('example.org'), {})
+
+    import argparse
+    ns = argparse.Namespace(thin_words=300, limit=0, psi=False, out=None, urls=None,
+                            site='zavodsvay.ru', diff=False, psi_strategy='mobile',
+                            compare=None, all=None)
+    apply_site_options(ns, 'zavodsvay.ru', 'тест')
+    check('порог реально применился (дефис → подчёркивание)', ns.thin_words, 45)
+    check('поля не плодились мусором', 'thin-words' in vars(ns), False)
+    check('неизвестный ключ не роняет прогон',
+          (lambda: (apply_site_options(ns, 'example.org', 'тест'),
+                     ns.thin_words)[1])(), 45)
     site_issues, summary, _ = site_report(
         [ml], {'exists': True, 'sitemaps': [], 'disallow_all': False},
         {'files': [], 'errors': [], 'urls': []}, 'https://example.ru')
