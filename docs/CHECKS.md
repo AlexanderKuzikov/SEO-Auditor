@@ -55,6 +55,7 @@
 | Код | Уровень | Условие |
 |-----|---------|----------|
 | `ROBOTS_DISALLOW_ALL` | error | `Disallow: /` — сайт закрыт роботам |
+| `NO_HTTPS` | error | TLS не отвечает, сайт доступен только по HTTP. Аудит продолжается по HTTP, но без TLS браузер помечает сайт «небезопасным», а поисковики не дают полного доверия странице |
 | `BROKEN_PAGES` | error | есть URL с 4xx/5xx |
 | `SITEMAP_ERROR` | error | sitemap недоступен или невалидный XML |
 | `NO_ROBOTS` | error | robots.txt отдаёт 404 |

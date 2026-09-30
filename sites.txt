@@ -5,6 +5,15 @@
 #   529 из 574 страниц этого сайта — карточки /objects/N/ по 52-66 слов.
 #   При пороге 300 они все выглядели бы «тонкими», хотя это дизайн каталога.
 #
+# Репозитории с исходниками (правки делаются там, аудитор только читает сайт):
+#   zavodsvay.ru        -> Zavodsvay-Static
+#   zavodsvay.com       -> ZavodsvayCom
+#   perm-pirs-ponton.ru -> Pirs-Ponton
+#   yamobur-vezdehod.ru -> Yamobur
+#   ubm-85.su           -> Ubm-85
+#
 zavodsvay.ru # thin-words=45
+zavodsvay.com
+perm-pirs-ponton.ru
 yamobur-vezdehod.ru
-ubm.ru
+ubm-85.su

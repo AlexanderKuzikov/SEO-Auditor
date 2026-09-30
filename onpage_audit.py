@@ -804,6 +804,25 @@ def audit_page(url: str, host: str, use_psi: bool, psi_key: str, strategy: str,
     return page
 
 
+def ensure_reachable(site: str) -> tuple:
+    """Если HTTPS не отвечает — откатиться на HTTP и сообщить, что TLS недоступен.
+
+    Отдельный дефект, а не повод отказаться от аудита: без HTTPS браузер помечает
+    сайт «небезопасным», а поисковики не дают полного доверия странице.
+    """
+    res = fetch(site)
+    if not res['error'] and res['status'] < 500:
+        return site, None
+    if site.startswith('https://'):
+        plain = 'http://' + site[len('https://'):]
+        res2 = fetch(plain)
+        if not res2['error'] and res2['status'] < 500:
+            return plain, ('NO_HTTPS', 'error', 'HTTPS не отвечает, сайт доступен только по HTTP',
+                           'включить TLS — без него браузер помечает сайт «небезопасным», '
+                           'а Яндекс и Google не дают странице полного доверия')
+    return site, None
+
+
 def run_site(site: str, args) -> dict | None:
     """Полный цикл по одному сайту. Возвращает краткую сводку или None при неудаче."""
     if '://' not in site:
@@ -812,6 +831,11 @@ def run_site(site: str, args) -> dict | None:
     host = urllib.parse.urlsplit(site).netloc.lower()
     audit_dir = os.path.join(AUDIT_ROOT, host.replace(':', '_'))
     print(f'\n{"=" * 60}\nсайт: {site}')
+
+    site, tls_issue = ensure_reachable(site)
+    if tls_issue:
+        print(f'  {site}')
+        print('  ВНИМАНИЕ: HTTPS не отвечает — продолжаю по HTTP, это отдельный дефект')
 
     robots = parse_robots(site)
     print(f"robots.txt: HTTP {robots['status']}, sitemaps в директиве: {len(robots['sitemaps'])}")
@@ -857,6 +881,9 @@ def run_site(site: str, args) -> dict | None:
                 print(f'  {i}/{len(futures)} ({time.time() - started:.0f}s)')
 
     site_issues, summary, dups = site_report(pages, robots, sitemaps, site)
+    if tls_issue:
+        site_issues.insert(0, {'level': tls_issue[1], 'code': tls_issue[0],
+                               'msg': tls_issue[2], 'fix': tls_issue[3]})
     summary['discovered'] = discovered
     summary['truncated'] = truncated
     if truncated:
