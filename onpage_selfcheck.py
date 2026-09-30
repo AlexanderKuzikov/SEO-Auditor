@@ -154,7 +154,11 @@ def main() -> None:
     check('hreflang собран как lang+url', ml['hreflang'],
           [{'lang': 'ru', 'href': 'https://example.ru/svai/'},
            {'lang': 'en', 'href': 'https://example.com/piles/'}])
-    from onpage_audit import site_report
+    from onpage_audit import site_report, parse_site_line
+    check('настройки домена из строки списка',
+          parse_site_line('zavodsvay.ru # thin-words=45 limit=100'),
+          ('zavodsvay.ru', {'thin-words': '45', 'limit': '100'}))
+    check('домен без настроек', parse_site_line('  ubm.ru  '), ('ubm.ru', {}))
     site_issues, summary, _ = site_report(
         [ml], {'exists': True, 'sitemaps': [], 'disallow_all': False},
         {'files': [], 'errors': [], 'urls': []}, 'https://example.ru')
@@ -192,15 +196,22 @@ def main() -> None:
         {'url': 'https://zavodsvay.ru/a/', 'status': 200, 'title_len': 10,
          'word_count': 100, 'indexable': True, 'issues': []},
         {'url': 'https://zavodsvay.ru/old/', 'status': 200, 'issues': []}],
-        'summary': {'issues_by_code': {'NO_TITLE': 5, 'IMG_NO_ALT': 2}, 'ok': 2}}
+        'summary': {'issues_by_code': {'NO_TITLE': 5, 'IMG_NO_ALT': 2}, 'ok': 2,
+                    'truncated': True, 'discovered': 500}}
     new = {'generated': '2026-02-01', 'pages': [
         {'url': 'https://zavodsvay.ru/a', 'status': 200, 'title_len': 60,
          'word_count': 100, 'indexable': True, 'issues': []},
         {'url': 'https://zavodsvay.ru/new/', 'status': 200, 'issues': []}],
-        'summary': {'issues_by_code': {'NO_TITLE': 1, 'IMG_NO_ALT': 2}, 'ok': 2}}
+        'summary': {'issues_by_code': {'NO_TITLE': 1, 'IMG_NO_ALT': 2}, 'ok': 2,
+                    'truncated': False}}
     d = compare(old, new)
     check('diff: добавленных', d['added'], ['https://zavodsvay.ru/new/'])
     check('diff: удалённых', d['removed'], ['https://zavodsvay.ru/old/'])
+    check('diff: срез и полный прогон помечаются ненадёжными',
+          (old['summary'].get('truncated'), new['summary'].get('truncated'), d['reliable']),
+          (True, False, False))
+    check('diff: причина указана', 'усечён' in (d['unreliable_reason'] or ''), True)
+    check('diff без усечения надёжен', compare(new, new)['reliable'], True)
     check('diff: /a/ и /a — одна страница, изменён title_len', d['metric_changes'],
           [{'url': 'https://zavodsvay.ru/a', 'field': 'title_len', 'from': 10, 'to': 60}])
     check('diff: счётчики кодов', d['issue_counts'],

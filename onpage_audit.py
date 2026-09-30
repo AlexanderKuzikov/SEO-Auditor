@@ -339,7 +339,7 @@ def ld_types(node, out: set) -> set:
 
 # --- page analysis ---------------------------------------------------------
 
-def analyze(res: dict, host: str) -> dict:
+def analyze(res: dict, host: str, thin_words: int = THIN_WORDS) -> dict:
     url, final = res['url'], res['final_url']
     page = {
         'url': url, 'final_url': final, 'status': res['status'],
@@ -514,9 +514,10 @@ def analyze(res: dict, host: str) -> dict:
     if not page['seo_url']:
         add('warn', 'SEO_URL', f'неоптимальный URL: {path}',
             'транслит, без подчёркиваний, короче 75 символов')
-    if page['word_count'] and page['word_count'] < THIN_WORDS:
-        add('warn', 'THIN_CONTENT', f'{page["word_count"]} слов — мало для индексации',
-            'расширить контент или объединить со страницей-приёмником')
+    if page['word_count'] and page['word_count'] < thin_words:
+        add('warn', 'THIN_CONTENT', f'{page["word_count"]} слов — меньше порога {thin_words}',
+            f'расширить контент или объединить со страницей-приёмником; если это карточки '
+            f'однотипного каталога, порог неприменим — см. --thin-words')
     if not page['schema_types'] and not page['schema_error']:
         add('info', 'NO_SCHEMA', 'нет JSON-LD разметки',
             'добавить Organization/LocalBusiness + BreadcrumbList + WebSite')
@@ -677,7 +678,9 @@ def site_report(pages: list, robots: dict, sitemaps: dict, site: str) -> tuple:
                 'x-default указывает на страницу выбора языка для неподходящей локали')
 
     https = sum(1 for p in pages if p['url'].startswith('https://'))
-    words = [p['word_count'] for p in ok if p['word_count']]
+    words = sorted(p['word_count'] for p in ok if p['word_count'])
+    median_w = words[len(words) // 2] if words else 0
+    thin_vs_median = sum(1 for w in words if w < median_w * 0.5) if median_w else 0
     by_level = {}
     for p in pages:
         for i in p['issues']:
@@ -694,7 +697,10 @@ def site_report(pages: list, robots: dict, sitemaps: dict, site: str) -> tuple:
         'broken': len(errors),
         'https_share': round(https / len(pages), 3) if pages else None,
         'avg_words': round(sum(words) / len(words)) if words else None,
-        'median_words': sorted(words)[len(words) // 2] if words else None,
+        'median_words': words[len(words) // 2] if words else None,
+        'words_p10': words[int(len(words) * 0.1)] if words else None,
+        'words_p90': words[int(len(words) * 0.9)] if words else None,
+        'thin_vs_median': thin_vs_median,
         'with_canonical': sum(1 for p in ok if p['canonical']),
         'indexable': sum(1 for p in ok if p['indexable']),
         'with_schema': sum(1 for p in ok if p['schema_types']),
@@ -718,6 +724,12 @@ def compare(old: dict, new: dict) -> dict:
     def index(snap):
         return {norm_key(p['url']): p for p in snap.get('pages', [])}
 
+    unreliable = []
+    for label, snap in (('предыдущий', old), ('текущий', new)):
+        if snap.get('summary', {}).get('truncated'):
+            unreliable.append(f'{label} прогон был усечён '
+                              f'({snap["summary"].get("ok")} из {snap["summary"].get("discovered")})')
+
     o, n = index(old), index(new)
     added, removed, changed, issues = sorted(set(n) - set(o)), sorted(set(o) - set(n)), [], []
     for key in sorted(set(o) & set(n)):
@@ -738,6 +750,8 @@ def compare(old: dict, new: dict) -> dict:
     return {
         'generated': new.get('generated'),
         'previous': old.get('generated'),
+        'reliable': not unreliable,
+        'unreliable_reason': '; '.join(unreliable) if unreliable else None,
         'added': [n[k]['url'] for k in added],
         'removed': [o[k]['url'] for k in removed],
         'metric_changes': changed[:200],
@@ -781,8 +795,9 @@ def archive_existing(path: str) -> str:
 
 # --- run -------------------------------------------------------------------
 
-def audit_page(url: str, host: str, use_psi: bool, psi_key: str, strategy: str) -> dict:
-    page = analyze(fetch(url), host)
+def audit_page(url: str, host: str, use_psi: bool, psi_key: str, strategy: str,
+               thin_words: int = THIN_WORDS) -> dict:
+    page = analyze(fetch(url), host, thin_words)
     if use_psi and page['status'] == 200 and norm_key(url) == norm_key(page['final_url']):
         page['cwv'] = psi(page['final_url'], strategy, psi_key)
     time.sleep(DELAY)
@@ -811,9 +826,20 @@ def run_site(site: str, args) -> dict | None:
         urls = sitemaps['urls']
         if not urls:
             print('sitemap пуст — фолбэк-обход с главной')
-            urls = bfs_urls(site, args.limit)
-    urls = [u for u in urls if not u.lower().split('?')[0].endswith(SEO_SUFFIX)][:args.limit]
-    print(f'URL к проверке: {len(urls)} (источник: {source})')
+            urls = bfs_urls(site, args.limit or 200)
+    discovered = len(urls)
+    if args.limit:
+        urls = urls[:args.limit]
+    else:
+        urls = [u for u in urls if not u.lower().split('?')[0].endswith(SEO_SUFFIX)]
+    truncated = len(urls) < discovered
+    print(f'URL к проверке: {len(urls)} из {discovered} (источник: {source})')
+    if truncated:
+        print(f'ВНИМАНИЕ: усечение — проверено {len(urls)} из {discovered}, '
+              f'остальные {discovered - len(urls)} не смотрены. Сними --limit или укажи больше.')
+    elif discovered > 500:
+        print(f'  прогон большой: ~{discovered / 4 * 1.0 / 60:.0f} мин при 4 потоках. '
+              'Для чужого крупного сайта лучше ограничить --limit.')
     if not urls:
         print('пропускаю сайт: не нашлось ни одного URL для проверки')
         return None
@@ -822,7 +848,8 @@ def run_site(site: str, args) -> dict | None:
     started = time.time()
     pages = []
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        futures = [pool.submit(audit_page, u, host, args.psi, psi_key, args.psi_strategy)
+        futures = [pool.submit(audit_page, u, host, args.psi, psi_key, args.psi_strategy,
+                               args.thin_words)
                    for u in urls]
         for i, fut in enumerate(futures, 1):
             pages.append(fut.result())
@@ -830,6 +857,10 @@ def run_site(site: str, args) -> dict | None:
                 print(f'  {i}/{len(futures)} ({time.time() - started:.0f}s)')
 
     site_issues, summary, dups = site_report(pages, robots, sitemaps, site)
+    summary['discovered'] = discovered
+    summary['truncated'] = truncated
+    if truncated:
+        summary['sitemap_urls'] = discovered
     snap = {
         'generated': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'site': site, 'url_source': source, 'robots': robots, 'sitemaps': sitemaps,
@@ -881,7 +912,10 @@ def run_site(site: str, args) -> dict | None:
            'orphans': summary['orphans'], 'not_in_sitemap': summary['not_in_sitemap'],
            'indexable': summary['indexable'], 'with_schema': summary['with_schema'],
            'median_words': summary['median_words'], 'snapshot': out,
+           'words_p10': summary['words_p10'], 'words_p90': summary['words_p90'],
+           'thin_vs_median': summary['thin_vs_median'], 'thin_words': args.thin_words,
            'source': source, 'sitemap_urls': summary['sitemap_urls'],
+           'discovered': discovered, 'truncated': truncated,
            'errors': summary['issues_by_level'].get('error', 0),
            'top_issue': next(iter(summary['issues_by_code']), '—')}
 
@@ -901,9 +935,13 @@ def run_site(site: str, args) -> dict | None:
             for ic in d['issue_counts']:
                 print(f"  {ic['code']}: {ic['from']} → {ic['to']} ({ic['delta']:+d})")
             print(f'diff: {path}')
-            row['diff'] = {'added': len(d['added']), 'removed': len(d['removed']),
-                           'metric_changes': d['metric_changes_total'],
-                           'regressions': [ic for ic in d['issue_counts'] if ic['delta'] > 0]}
+            if d['reliable']:
+                row['diff'] = {'added': len(d['added']), 'removed': len(d['removed']),
+                               'metric_changes': d['metric_changes_total'],
+                               'regressions': [ic for ic in d['issue_counts'] if ic['delta'] > 0]}
+            else:
+                print(f'  ДЕЛЬТА НЕНАДЁЖНА: {d["unreliable_reason"]}. '
+                      'Сравнивать снимки разного объёма бессмысленно — сначала прогони без --limit.')
     return row
 
 
@@ -913,21 +951,32 @@ def print_overview(rows: list) -> None:
         return
     print(f'\n{"=" * 60}\nСВОДКА ПО СЕТИ — {len(rows)} домен(ов)\n')
     print('ист = источник URL; bfs = sitemap недоступен, обход с главной по ссылкам (покрытие неполное)')
-    head = (f"{'домен':<22} {'ист':<6} {'ok':>4} {'404':>4} {'ошиб':>5} {'сирот':>6} "
+    head = (f"{'домен':<22} {'ист':<6} {'покрытие':>9} {'404':>4} {'ошиб':>5} {'сирот':>6} "
             f"{'не в sm':>8} {' слов':>6}  топ-проблема")
     print(head)
     print('-' * len(head))
     for r in rows:
         words = r['median_words'] if r['median_words'] is not None else '—'
         missed = r['not_in_sitemap'] if r['not_in_sitemap'] is not None else '—'
-        print(f"{r['host']:<22} {r['source']:<6} {r['ok']:>4} {r['broken']:>4} "
+        cover = f"{r['ok']}/{r['discovered']}" + ('!' if r['truncated'] else '')
+        print(f"{r['host']:<22} {r['source']:<6} {cover:>9} {r['broken']:>4} "
               f"{r['errors']:>5} {r['orphans']:>6} {str(missed):>8} {str(words):>6}  {r['top_issue']}")
     total_err = sum(r['errors'] for r in rows)
     total_broken = sum(r['broken'] for r in rows)
     partial = [r['host'] for r in rows if r['source'] != 'sitemap']
+    cut = [f"{r['host']} ({r['ok']} из {r['discovered']})" for r in rows if r['truncated']]
     print(f"\nвсего замечаний уровня error: {total_err}, битых URL: {total_broken}")
+    if cut:
+        print('УСЕЧЕНИЕ (проверена не часть сайта, а её срез): ' + ', '.join(cut))
     if partial:
         print('неполное покрытие (нужен sitemap или --urls): ' + ', '.join(partial))
+    print('\nдлина текста (слов): p10 / медиана / p90, и сколько страниц в 2+ раза короче медианы')
+    for r in rows:
+        p10 = r['words_p10'] if r['words_p10'] is not None else '—'
+        p90 = r['words_p90'] if r['words_p90'] is not None else '—'
+        med = r['median_words'] if r['median_words'] is not None else '—'
+        print(f"  {r['host']:<22} {str(p10):>4} / {str(med):>4} / {str(p90):>4}   "
+              f"выбросов: {r['thin_vs_median']} (порог THIN_CONTENT = {r['thin_words']})")
     regressions = [(r['host'], ic) for r in rows if r.get('diff')
                    for ic in r['diff']['regressions']]
     if regressions:
@@ -938,15 +987,30 @@ def print_overview(rows: list) -> None:
         print('\nрегрессий нет — ни один счётчик проблем не вырос')
 
 
+def parse_site_line(line: str) -> tuple:
+    """`domain # key=value key=value` → (домен, настройки прогона)."""
+    domain, _, tail = line.partition('#')
+    opts = {}
+    for token in tail.split():
+        if '=' in token:
+            key, _, value = token.partition('=')
+            opts[key.strip()] = value.strip()
+    return domain.strip(), opts
+
+
 def main() -> None:
     sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser(description='On-page SEO-аудит с diff прогонов')
     ap.add_argument('site', nargs='?', help='URL сайта')
     ap.add_argument('--all', metavar='FILE', help='файл со списком доменов, по одному в строке')
-    ap.add_argument('--limit', type=int, default=200, help='максимум URL на сайт (по умолчанию 200)')
+    ap.add_argument('--limit', type=int, default=0,
+                    help='максимум URL на сайт; 0 = без усечения (по умолчанию)')
     ap.add_argument('--urls', help='файл со списком URL одного сайта')
     ap.add_argument('--psi', action='store_true', help='добавить PageSpeed Insights (field data)')
     ap.add_argument('--psi-strategy', default='mobile', choices=('mobile', 'desktop'))
+    ap.add_argument('--thin-words', type=int, default=THIN_WORDS,
+                    help=f'порог THIN_CONTENT (по умолчанию {THIN_WORDS}); '
+                         'для каталога карточек поставь меньше')
     ap.add_argument('--diff', action='store_true', help='сравнить с предыдущим снимком')
     ap.add_argument('--compare', nargs=2, metavar=('OLD', 'NEW'), help='diff двух файлов')
     ap.add_argument('--out', help='путь к файлу снимка (только для одного сайта)')
@@ -966,12 +1030,28 @@ def main() -> None:
         if args.urls:
             ap.error('--urls рассчитан на один сайт, с --all он применится к каждому домену')
         with open(args.all, encoding='utf-8') as f:
-            sites = [l.split('#')[0].strip() for l in f]
-        sites = [s for s in sites if s and not s.startswith('#')]
+            lines = [parse_site_line(l) for l in f if l.strip() and not l.strip().startswith('#')]
+        sites = [(d, o) for d, o in lines if d]
         if not sites:
             sys.exit(f'в файле {args.all} нет ни одного домена')
         print(f'доменов в списке: {len(sites)}')
-        rows = [r for r in (run_site(s, args) for s in sites) if r]
+        rows = []
+        for domain, opts in sites:
+            site_args = argparse.Namespace(**vars(args))
+            if 'thin-words' in opts:
+                site_args.thin_words = int(opts['thin-words'])
+            if 'limit' in opts:
+                site_args.limit = int(opts['limit'])
+            if 'psi' in opts:
+                site_args.psi = opts['psi'].lower() in ('1', 'true', 'yes')
+            for key in opts:
+                if key not in ('thin-words', 'limit', 'psi'):
+                    print(f'  игнорирую неизвестную настройку {key} у {domain}')
+            if site_args.thin_words != args.thin_words:
+                print(f'  {domain}: порог THIN_CONTENT = {site_args.thin_words}')
+            row = run_site(domain, site_args)
+            if row:
+                rows.append(row)
         print_overview(rows)
         return
 
