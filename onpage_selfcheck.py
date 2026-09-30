@@ -61,6 +61,13 @@ SCHEMA_BAD = ('<html><head><title>x</title>'
               '</head><body><h1>y</h1><h2>z</h2>' + FILLER * 8 +
               '</body></html>')
 
+MULTILANG = ('<html lang="ru"><head><title>Сваи — купить в Перми</title>'
+             '<link rel="canonical" href="https://example.ru/svai/">'
+             '<link rel="alternate" hreflang="ru" href="https://example.ru/svai/">'
+             '<link rel="alternate" hreflang="en" href="https://example.com/piles/">'
+             '</head><body><h1>Сваи</h1>' + FILLER * 8 +
+             '<a href="/katalog/">Каталог</a></body></html>')
+
 
 def res(url, body, status=200, ctype='text/html; charset=utf-8', error=None):
     return {'url': url, 'final_url': url, 'status': status, 'content_type': ctype,
@@ -142,6 +149,24 @@ def main() -> None:
 
     sb = analyze(res('https://zavodsvay.ru/x/', SCHEMA_BAD), HOST)
     check('битый JSON-LD', 'SCHEMA_INVALID' in codes(sb), True)
+
+    ml = analyze(res('https://example.ru/svai/', MULTILANG), 'example.ru')
+    check('hreflang собран как lang+url', ml['hreflang'],
+          [{'lang': 'ru', 'href': 'https://example.ru/svai/'},
+           {'lang': 'en', 'href': 'https://example.com/piles/'}])
+    from onpage_audit import site_report
+    site_issues, summary, _ = site_report(
+        [ml], {'exists': True, 'sitemaps': [], 'disallow_all': False},
+        {'files': [], 'errors': [], 'urls': []}, 'https://example.ru')
+    site_codes = {i['code'] for i in site_issues}
+    check('hreflang помечен как неполный (нет x-default)',
+          'HREFLANG_INCOMPLETE' in site_codes and 'HREFLANG_NO_XDEFAULT' in site_codes, True)
+
+    plain_codes = {i['code'] for i in site_report(
+        [good], {'exists': True, 'sitemaps': [], 'disallow_all': False},
+        {'files': [], 'errors': [], 'urls': []}, 'https://zavodsvay.ru')[0]}
+    check('одноязычный сайт не получает замечаний по hreflang',
+          {c for c in plain_codes if c.startswith('HREFLANG')}, set())
 
     http = analyze({'url': 'http://zavodsvay.ru/a/', 'final_url': 'https://zavodsvay.ru/a/',
                     'status': 200, 'content_type': 'text/html', 'bytes': 100,

@@ -5,20 +5,22 @@
 </p>
 
 <h1 align="center">SEO Auditor</h1>
-<p align="center">On-page аудит сайта под выдачу Яндекса со снимками и diff прогонов</p>
+<p align="center">On-page аудит сайта со снимками и diff прогонов — под Яндекс, Google и Bing</p>
 
 ---
 
 Zero-dependency CLI на стандартной библиотеке Python. Обходит сайт, разбирает HTML, проверяет ~40 on-page условий и складывает снимок в JSON. Главная ценность — **diff двух прогонов**: «до и после» миграции, деплоя или правки — с отчётом, что именно сломалось.
 
-Аналог на GitHub (`AgriciDaniel/on-page-seo`) — обёртка над платными Firecrawl + DataForSEO. Здесь вместо них собственный краулер и чек-лист, адаптированный под Яндекс: без Google-only метрик, с учётом кириллицы в URL, схемы `FAQPage`/`HowTo` без rich results и редиректов http→https в sitemap.
+Чек-лист разделён на два слоя: **базовый** (title, description, canonical, meta robots, иерархия заголовков, alt, robots.txt, sitemap, дубли, Core Web Vitals, hreflang — трактуется одинаково у всех поисковиков) и **слой специфики Яндекса** (кириллица в URL, типы Schema без rich results, длины под обрезку в сниппете). Bing-специфика добавлялась бы третьим слоем.
+
+Аналог на GitHub (`AgriciDaniel/on-page-seo`) — обёртка над платными Firecrawl + DataForSEO. Здесь вместо них собственный краулер: без внешних API, без зарубежной оплаты картой РФ, с CWV из field data CrUX.
 
 - **Zero dependencies** — только `urllib` и `html.parser`, ничего ставить не нужно.
-- **Свой чек-лист** — title, description, canonical, meta robots, H1-H6, JSON-LD, alt, mixed content, редиректы, thin content, битые URL.
+- **Свой чек-лист** — title, description, canonical, meta robots, H1-H6, JSON-LD, alt, mixed content, редиректы, thin content, битые URL, hreflang.
 - **Уровни сайта** — robots.txt, sitemap, дубли title/description/H1, сироты, покрытие sitemap, https.
 - **Снимки + diff** — история по датам, отчёт о дельте метрик и счётчиков проблем.
 - **Снимки по хостам** — сеть из нескольких доменов не перетирает друг друга.
-- **PageSpeed Insights** — опционально, field data CrUX (LCP/INP/CLS), не Labs.
+- **Core Web Vitals** — LCP/INP/CLS из field data CrUX (75-й перцентиль реальных пользователей), не Labs. Метрика кросс-поисковиковая, требует ключ `PSI_API_KEY`.
 - **Самопроверка** — `python onpage_selfcheck.py`, без фреймворков и фикстур на диске.
 
 ## Использование

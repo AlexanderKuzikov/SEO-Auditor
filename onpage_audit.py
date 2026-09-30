@@ -405,7 +405,8 @@ def analyze(res: dict, host: str) -> dict:
         if 'canonical' in lt['rel']:
             page['canonical'] = urllib.parse.urljoin(final, lt['href'])
         if 'alternate' in lt['rel'] and lt['hreflang']:
-            page['hreflang'].append(f"{lt['hreflang']}:{lt['href']}")
+            page['hreflang'].append({'lang': lt['hreflang'],
+                                     'href': urllib.parse.urljoin(final, lt['href'])})
     if page['canonical']:
         page['canonical_matches'] = norm_key(page['canonical']) == norm_key(final)
 
@@ -502,8 +503,8 @@ def analyze(res: dict, host: str) -> dict:
         add('warn', 'NO_VIEWPORT', ' нет viewport — мобильная выдача страдает',
             'добавить meta viewport width=device-width')
     if not page['og']:
-        add('info', 'NO_OG', 'нет Open Graph — не влияет на выдачу Яндекса, нужно для соцсетей',
-            'добавить og:title/og:description/og:image при репостах в соцсети')
+        add('info', 'NO_OG', 'нет Open Graph — на ранжирование не влияет, нужен для превью в соцсетях и мессенджерах',
+            'добавить og:title/og:description/og:image при репостах')
     if page['http_refresh']:
         add('warn', 'HTTP_REFRESH', f'http-equiv refresh: {page["http_refresh"]}',
             'заменить редирект на серверный 301/302')
@@ -522,7 +523,7 @@ def analyze(res: dict, host: str) -> dict:
     dead = sorted(set(page['schema_types']) & DEAD_SCHEMA)
     if dead:
         add('info', 'DEAD_SCHEMA', f'типы без rich results: {", ".join(dead)}',
-            'оставить только ради семантики или удалить (Яндекс не показывает)')
+            'валидны для семантики, но сниплет не расширят ни Яндекс, ни Google — оставить или удалить')
     if page['schema_error']:
         add('error', 'SCHEMA_INVALID', 'JSON-LD не парсится — разметка сломана',
             'проверить синтаксис JSON в script ld+json')
@@ -665,6 +666,15 @@ def site_report(pages: list, robots: dict, sitemaps: dict, site: str) -> tuple:
     if orphans:
         add('warn', 'ORPHAN_PAGES', f'{len(orphans)} страниц без входящих внутренних ссылок',
             'добавить ссылки из меню/хлебных крошек/статей')
+
+    alts = [p for p in ok if p['hreflang']]
+    if alts:
+        add('warn', 'HREFLANG_INCOMPLETE', f'hreflang есть на {len(alts)} страницах, '
+            f'покрывает {len({norm_key(a["href"]) for p in alts for a in p["hreflang"]})} URL',
+            'языковые версии должны быть взаимно ссылающимися, иначе робот не свяжет их в группу')
+        if not any(a['lang'] == 'x-default' for p in alts for a in p['hreflang']):
+            add('info', 'HREFLANG_NO_XDEFAULT', 'нет x-default среди языковых версий',
+                'x-default указывает на страницу выбора языка для неподходящей локали')
 
     https = sum(1 for p in pages if p['url'].startswith('https://'))
     words = [p['word_count'] for p in ok if p['word_count']]
