@@ -1,0 +1,63 @@
+<p align="center">
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=Python&logoColor=white"></a>
+  <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
+  <a href="https://yandex.ru/"><img alt="Yandex SEO" src="https://img.shields.io/badge/%D0%A7%D0%B5%D0%BA%D0%B8-%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D0%BC1-red.svg"></a>
+</p>
+
+<h1 align="center">SEO Auditor</h1>
+<p align="center">On-page аудит сайта под выдачу Яндекса со снимками и diff прогонов</p>
+
+---
+
+Zero-dependency CLI на стандартной библиотеке Python. Обходит сайт, разбирает HTML, проверяет ~40 on-page условий и складывает снимок в JSON. Главная ценность — **diff двух прогонов**: «до и после» миграции, деплоя или правки — с отчётом, что именно сломалось.
+
+Аналог на GitHub (`AgriciDaniel/on-page-seo`) — обёртка над платными Firecrawl + DataForSEO. Здесь вместо них собственный краулер и чек-лист, адаптированный под Яндекс: без Google-only метрик, с учётом кириллицы в URL, схемы `FAQPage`/`HowTo` без rich results и редиректов http→https в sitemap.
+
+- **Zero dependencies** — только `urllib` и `html.parser`, ничего ставить не нужно.
+- **Свой чек-лист** — title, description, canonical, meta robots, H1-H6, JSON-LD, alt, mixed content, редиректы, thin content, битые URL.
+- **Уровни сайта** — robots.txt, sitemap, дубли title/description/H1, сироты, покрытие sitemap, https.
+- **Снимки + diff** — история по датам, отчёт о дельте метрик и счётчиков проблем.
+- **Снимки по хостам** — сеть из нескольких доменов не перетирает друг друга.
+- **PageSpeed Insights** — опционально, field data CrUX (LCP/INP/CLS), не Labs.
+- **Самопроверка** — `python onpage_selfcheck.py`, без фреймворков и фикстур на диске.
+
+## Использование
+
+```bash
+python onpage_audit.py https://example.ru --limit 200
+python onpage_audit.py https://example.ru --limit 200 --diff
+python onpage_audit.py https://example.ru --urls data/urls.txt --psi
+python onpage_audit.py --compare audits/example.ru/onpage-A.json audits/example.ru/onpage-B.json
+```
+
+## Опции
+
+| Флаг | Описание | Default |
+|------|----------|---------|
+| `--limit N` | максимум URL за прогон | 200 |
+| `--urls FILE` | свой список URL вместо sitemap | — |
+| `--diff` | сравнить с предыдущим снимком | off |
+| `--compare OLD NEW` | diff двух файлов, без обхода | — |
+| `--psi` | добавить Core Web Vitals (нужен `PSI_API_KEY`) | off |
+| `--psi-strategy` | `mobile` или `desktop` | mobile |
+| `--out FILE` | свой путь к снимку | `audits/<host>/onpage-<date>.json` |
+
+## Проверка
+
+```bash
+python onpage_selfcheck.py
+```
+
+## Документация
+
+- [`docs/CONTEXT.md`](docs/CONTEXT.md) — состояние проекта
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — архитектурные решения
+- [`docs/CHECKS.md`](docs/CHECKS.md) — полный список проверок и порогов
+
+## Статус
+
+**v0.1.0** — рабочий аудит и diff, self-check зелёный, верифицирован на zavodsvay.ru (40 URL из sitemap).
+
+## Лицензия
+
+[MIT](LICENSE) © Alexander Kuzikov
